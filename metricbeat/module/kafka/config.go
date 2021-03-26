@@ -19,7 +19,10 @@ package kafka
 
 import (
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/Shopify/sarama"
 
 	"github.com/elastic/beats/v7/libbeat/common/transport/tlscommon"
 )
@@ -31,6 +34,39 @@ type metricsetConfig struct {
 	Username string            `config:"username"`
 	Password string            `config:"password"`
 	ClientID string            `config:"client_id"`
+	Sasl     saslConfig        `config:"sasl"`
+}
+
+type saslConfig struct {
+	SaslMechanism string `config:"mechanism"`
+	//SaslUsername  string `config:"username"` //maybe use ssl.username ssl.password instead in future?
+	//SaslPassword  string `config:"password"`
+}
+
+func (c *saslConfig) configureSarama(config *sarama.Config) error {
+	switch strings.ToUpper(c.SaslMechanism) { // try not to force users to use all upper case
+	case "":
+		// SASL is not enabled
+		return nil
+	case saslTypePlaintext:
+		config.Net.SASL.Mechanism = sarama.SASLMechanism(sarama.SASLTypePlaintext)
+	case saslTypeSCRAMSHA256:
+		config.Net.SASL.Handshake = true
+		config.Net.SASL.Mechanism = sarama.SASLMechanism(sarama.SASLTypeSCRAMSHA256)
+		config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+			return &XDGSCRAMClient{HashGeneratorFcn: SHA256}
+		}
+	case saslTypeSCRAMSHA512:
+		config.Net.SASL.Handshake = true
+		config.Net.SASL.Mechanism = sarama.SASLMechanism(sarama.SASLTypeSCRAMSHA512)
+		config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+			return &XDGSCRAMClient{HashGeneratorFcn: SHA512}
+		}
+	default:
+		return fmt.Errorf("not valid mechanism '%v', only supported with PLAIN|SCRAM-SHA-512|SCRAM-SHA-256", c.SaslMechanism)
+	}
+
+	return nil
 }
 
 var defaultConfig = metricsetConfig{
